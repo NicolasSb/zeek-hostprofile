@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+  - cron: 0 0 * * *
+
+jobs:
+  # Same pinned Zeek image as `make test`: red here means red locally.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: make test
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: btest-diag
+        path: testing/.tmp
+
+  # The committed traces must match what gen-traces.py produces.
+  traces:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: |
+        sum() { (cd testing/Traces && find . -type f | sort | xargs sha256sum); }
+        sum > "$RUNNER_TEMP/before"
+        make traces
+        sum > "$RUNNER_TEMP/after"
+        diff "$RUNNER_TEMP/before" "$RUNNER_TEMP/after"
+
+  # Other Zeek versions: informative only, baselines may differ.
+  compat:
+    name: compat-${{ matrix.zeekver }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        zeekver: [zeek-lts, zeek-nightly]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: zeek/action-zkg-install@v2
+      with:
+        zeek_version: ${{ matrix.zeekver }}
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: zkg-logs-${{ matrix.zeekver }}
+        path: ${{ github.workspace }}/.action-zkg-install/artifacts
