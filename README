@@ -1,4 +1,42 @@
 HostProfile
 =================================
 
-TODO: tell people what your package does!
+Per-host behavioral feature vectors for Zeek. Time is cut into tumbling
+windows (HostProfile::window_len, 5 min by default); for each local host
+(Site::local_nets) that originated traffic during a window, one row is
+written to hostprofile_features.log.
+
+Configuration
+-------------
+
+By default Zeek treats every private or reserved range as local, so hosts
+of those ranges are profiled too. Declare your own networks explicitly:
+
+  redef Site::private_address_space_is_local = F;
+  redef Site::local_nets = { 10.1.0.0/16 };   # your networks
+
+Layout
+------
+
+  scripts/main.zeek            windowing engine, distinct counters (HLL),
+                               novelty memory (rotating Bloom filters)
+  scripts/features/conn.zeek   volume, diversity, novelty, failures, rhythm
+  scripts/features/dns.zeek    queries, domains, novelty, NXDOMAIN rate
+  scripts/features/tls.zeek    SNI count and novelty
+
+A new feature family adds columns with ``redef record Features += {...}``,
+accumulates into WindowState/HostState and fills its columns in a
+``hook HostProfile::finalize`` handler.
+
+Testing
+-------
+
+Tests use btest (testing/tests/) and run in a Zeek container, so no local
+Zeek is needed:
+
+  make test           # run the tests
+  make test-update    # accept new outputs as baselines (review the diff first)
+  make traces         # regenerate the synthetic traces
+
+The traces come from testing/Scripts/gen-traces.py, which documents each
+scenario and its expected values.
