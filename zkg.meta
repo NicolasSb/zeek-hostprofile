@@ -1,0 +1,20 @@
+[package]
+script_dir = scripts
+build_command = ./configure && cmake --build build
+test_command = cd testing && btest -c btest.cfg
+summary = TODO: A summary of HostProfile in one line
+description = TODO: A more detailed description of HostProfile.
+	It can span multiple lines, with this indentation.
+
+[template]
+source = https://github.com/zeek/package-template
+version = v3.1.8
+zkg_version = 3.2.0
+features = github-ci,license,plugin
+
+[template_vars]
+name = HostProfile
+namespace = NicolasSb
+author = Nicolas Sourbier
+license = bsd-3
+
