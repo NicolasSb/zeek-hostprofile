@@ -1,19 +1,19 @@
 [package]
-build_command = ./configure && cmake --build build
+script_dir = scripts
 test_command = cd testing && btest -c btest.cfg
-summary = TODO: A summary of HostProfile in one line
-description = TODO: A more detailed description of HostProfile.
-	It can span multiple lines, with this indentation.
+summary = Per-host behavioral feature vectors over tumbling time windows.
+description = Writes hostprofile_features.log: for every local host active
+	during a window, one row of connection, DNS and TLS features (volume,
+	diversity, novelty, failure rate, rhythm), for anomaly detection or ML.
 
 [template]
 source = https://github.com/zeek/package-template
 version = v3.1.8
 zkg_version = 3.2.0
-features = github-ci,license,plugin
+features = github-ci,license
 
 [template_vars]
 name = HostProfile
 namespace = NicolasSb
 author = Nicolas Sourbier
 license = bsd-3
-
