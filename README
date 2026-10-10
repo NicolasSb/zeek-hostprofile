@@ -15,18 +15,31 @@ of those ranges are profiled too. Declare your own networks explicitly:
   redef Site::private_address_space_is_local = F;
   redef Site::local_nets = { 10.1.0.0/16 };   # your networks
 
+Cluster
+-------
+
+Works on any Zeek cluster, Broker or ZeroMQ, with the same output as a
+standalone Zeek. Workers send each observation (connection, DNS message,
+SNI) to the proxy owning its host (chosen by hashing the host), which keeps
+the windows and writes the rows. Without a proxy, the manager does it and
+warns at startup: add proxies to spread the load.
+
 Layout
 ------
 
-  scripts/main.zeek            windowing engine, distinct counters (HLL),
-                               novelty memory (rotating Bloom filters)
+  scripts/main.zeek            windowing engine, cluster dispatch, distinct
+                               counters (HLL), novelty memory (rotating
+                               Bloom filters)
   scripts/features/conn.zeek   volume, diversity, novelty, failures, rhythm
   scripts/features/dns.zeek    queries, domains, novelty, NXDOMAIN rate
   scripts/features/tls.zeek    SNI count and novelty
 
-A new feature family adds columns with ``redef record Features += {...}``,
-accumulates into WindowState/HostState and fills its columns in a
-``hook HostProfile::finalize`` handler.
+A new feature family adds columns with ``redef record Features += {...}``
+and its data with ``redef record Observation += {...}``. Its event handlers
+build an Observation and pass it to ``HostProfile::send``; a
+``hook HostProfile::observe`` handler accumulates it into
+WindowState/HostState, and a ``hook HostProfile::finalize`` handler fills
+the columns.
 
 Testing
 -------
@@ -39,4 +52,6 @@ Zeek is needed:
   make traces         # regenerate the synthetic traces
 
 The traces come from testing/Scripts/gen-traces.py, which documents each
-scenario and its expected values.
+scenario and its expected values. The cluster tests replay every trace
+through a local cluster and compare with standalone output
+(testing/Scripts/cluster-vs-standalone).
