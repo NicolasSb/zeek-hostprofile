@@ -25,6 +25,11 @@ export {
 	redef record HostState += {
 		seen_sni: Novelty &optional;
 	};
+
+	redef record Observation += {
+		## Lower-cased SNI of a client hello.
+		sni: string &optional;
+	};
 }
 
 event ssl_extension_server_name(c: connection, is_client: bool, names: string_vec)
@@ -33,9 +38,17 @@ event ssl_extension_server_name(c: connection, is_client: bool, names: string_ve
 	if ( ! is_client || |names| == 0 || ! is_monitored(h) )
 		return;
 
-	local ws = window_state(h);
-	local hs = host_state(h);
-	local sni = to_lower(names[0]);
+	send(Observation($host=h, $ts=network_time(), $sni=to_lower(names[0])));
+	}
+
+hook observe(o: Observation)
+	{
+	if ( ! o?$sni )
+		return;
+
+	local ws = window_state(o$host);
+	local hs = host_state(o$host);
+	local sni = o$sni;
 
 	if ( ! hs?$seen_sni )
 		hs$seen_sni = new_novelty();

@@ -5,13 +5,19 @@
 ##! fills its columns through the :zeek:see:`HostProfile::finalize` hook and
 ##! one row per active host is written to ``hostprofile_features.log``.
 ##!
-##! An event is always attributed to the window that is open when Zeek
-##! handles it (e.g. a connection belongs to the window in which it is
-##! removed). Windows without activity produce no row.
+##! An event is attributed to the window containing its timestamp (for a
+##! connection, its last packet). An event whose window is already closed
+##! counts in the next one. Windows without activity produce no row.
+##!
+##! In a cluster, workers only observe: each event becomes an Observation
+##! sent to the host's owner (a proxy chosen by hashing the host, else the
+##! manager), which keeps the windows and writes the rows. Standalone, the
+##! process is its own owner. Windows follow the observations' timestamps.
 ##!
 ##! Engine only: window clock, per-window/per-host state, HLL and Bloom
 ##! helpers. Features live in ``features/``, one file per family.
 
+@load base/frameworks/cluster
 @load base/utils/site
 
 module HostProfile;
@@ -57,6 +63,25 @@ export {
 	## current one (a key seen again is carried over to the next generation).
 	global seen_before: function(nv: Novelty, key: any): bool;
 
+	## Extra wait, on the owner's clock, before closing a window: covers the
+	## delay of observations sent by workers.
+	const close_delay = 5 sec &redef;
+
+	## One observed event of a monitored host. Families add an ``&optional``
+	## field holding their own data.
+	type Observation: record {
+		host: addr;
+		## When the event happened (packet time).
+		ts: time;
+	};
+
+	## Sends ``o`` to the owner of its host (see module doc).
+	global send: function(o: Observation);
+
+	## Run by the owner for each observation. The engine first moves the
+	## window clock; families then fill WindowState/HostState.
+	global observe: hook(o: Observation);
+
 	## One feature vector: a host's activity during one window. Feature
 	## families add their columns with ``redef record Features += {...}``.
 	type Features: record {
@@ -98,13 +123,42 @@ export {
 
 global windows: table[addr] of WindowState;
 global hosts: table[addr] of HostState &read_expire=host_expire;
+global window_open = F;
 global window_start: time = double_to_time(0.0);
+## End of the last flushed window: later observations never reopen it.
+global closed_until: time = double_to_time(0.0);
+## Latest observation timestamp: the owner's view of the packets' clock.
+global latest: time = double_to_time(0.0);
+
+global observe_remote: event(o: Observation);
+global close_window: event(start: time);
 
 event zeek_init() &priority=5
 	{
 	Log::create_stream(FEATURES_LOG, [$columns=Features, $ev=log_features,
 	                                  $path="hostprofile_features",
 	                                  $policy=log_policy]);
+
+	if ( Cluster::is_enabled() && Cluster::local_node_type() == Cluster::MANAGER &&
+	     Cluster::get_node_count(Cluster::PROXY) == 0 )
+		Reporter::warning("HostProfile: no proxy in the cluster, the manager computes all features");
+	}
+
+function send(o: Observation)
+	{
+	if ( ! Cluster::is_enabled() )
+		{
+		hook observe(o);
+		return;
+		}
+
+	if ( ! Cluster::publish_hrw(Cluster::proxy_pool, o$host, observe_remote, o) )
+		Cluster::publish(Cluster::manager_topic, observe_remote, o);
+	}
+
+event observe_remote(o: Observation)
+	{
+	hook observe(o);
 	}
 
 function is_monitored(h: addr): bool
@@ -163,6 +217,9 @@ function align(t: time): time
 
 function flush_window()
 	{
+	if ( ! window_open )
+		return;
+
 	local wend = window_start + window_len;
 
 	for ( h, ws in windows )
@@ -179,29 +236,48 @@ function flush_window()
 		}
 
 	windows = table();
+	window_open = F;
+	closed_until = wend;
 	}
 
-event HostProfile::close_window()
+# Makes the window holding ``ts`` the open one. A late ``ts`` counts in the
+# open window, or in the next one if its window is already closed.
+function advance(ts: time)
 	{
-	# At shutdown Zeek expires pending timers: the last window is flushed by
-	# zeek_done instead, after all connections have been removed.
-	if ( zeek_is_terminating() )
+	if ( ts > latest )
+		latest = ts;
+
+	if ( window_open && ts < window_start + window_len )
 		return;
 
 	flush_window();
-	window_start = window_start + window_len;
 
-	# Skip windows that passed without any packet: they have no activity.
-	if ( window_start + window_len <= network_time() )
-		window_start = align(network_time());
+	window_start = align(ts);
+	if ( window_start < closed_until )
+		window_start = closed_until;
+	window_open = T;
 
-	schedule (window_start + window_len - network_time()) { HostProfile::close_window() };
+	# Relative to the packets' clock, so a proxy (which sees no packets)
+	# waits the right time too.
+	local wait = window_start + window_len - latest;
+	if ( wait < 0 sec )
+		wait = 0 sec;
+	schedule (wait + close_delay) { HostProfile::close_window(window_start) };
 	}
 
-event network_time_init()
+hook observe(o: Observation) &priority=100
 	{
-	window_start = align(network_time());
-	schedule (window_start + window_len - network_time()) { HostProfile::close_window() };
+	advance(o$ts);
+	}
+
+event HostProfile::close_window(start: time)
+	{
+	# At shutdown Zeek expires pending timers: the last window is flushed by
+	# zeek_done instead, after all connections have been removed.
+	if ( zeek_is_terminating() || ! window_open || start != window_start )
+		return;
+
+	flush_window();
 	}
 
 event zeek_done()

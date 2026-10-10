@@ -1,8 +1,8 @@
 ##! Connection-level features: volume, diversity, novelty, structure, rhythm.
 ##!
 ##! Counts every connection originated by a monitored host when Zeek removes
-##! it (so a long connection is counted, with all its bytes, in the window
-##! where it ends). Columns: connection count, payload bytes out/in, distinct
+##! it, in the window of its last packet (so a long connection is counted,
+##! with all its bytes, in the window where it ends). Columns: connection count, payload bytes out/in, distinct
 ##! destinations and ports, share of never-seen destinations, share of local
 ##! destinations, share of failed attempts, and ``start_cv``, the regularity
 ##! of connection starts (near 0 = clockwork rhythm, e.g. beaconing).
@@ -53,6 +53,20 @@ export {
 	redef record HostState += {
 		seen_dst: Novelty &optional;
 	};
+
+	## A removed connection, as sent by the worker.
+	type ConnObs: record {
+		dst: addr;
+		dst_port: port;
+		orig_bytes: count;
+		resp_bytes: count;
+		state: string;
+		start: time;
+	};
+
+	redef record Observation += {
+		conn: ConnObs &optional;
+	};
 }
 
 event connection_state_remove(c: connection) &priority=-5
@@ -61,9 +75,23 @@ event connection_state_remove(c: connection) &priority=-5
 	if ( ! is_monitored(h) || ! c?$conn )
 		return;
 
-	local ws = window_state(h);
-	local hs = host_state(h);
-	local dst = c$id$resp_h;
+	# Stamped with its last packet: the removal itself may come much later.
+	send(Observation($host=h, $ts=c$start_time + c$duration, $conn=ConnObs(
+	    $dst=c$id$resp_h, $dst_port=c$id$resp_p,
+	    $orig_bytes=c$conn?$orig_bytes ? c$conn$orig_bytes : 0,
+	    $resp_bytes=c$conn?$resp_bytes ? c$conn$resp_bytes : 0,
+	    $state=c$conn$conn_state, $start=c$start_time)));
+	}
+
+hook observe(o: Observation)
+	{
+	if ( ! o?$conn )
+		return;
+
+	local co = o$conn;
+	local ws = window_state(o$host);
+	local hs = host_state(o$host);
+	local dst = co$dst;
 
 	if ( ! ws?$dst_hll )
 		{
@@ -74,10 +102,10 @@ event connection_state_remove(c: connection) &priority=-5
 		hs$seen_dst = new_novelty();
 
 	ws$n_conns += 1;
-	ws$bytes_out += c$conn?$orig_bytes ? c$conn$orig_bytes : 0;
-	ws$bytes_in += c$conn?$resp_bytes ? c$conn$resp_bytes : 0;
+	ws$bytes_out += co$orig_bytes;
+	ws$bytes_in += co$resp_bytes;
 	hll_cardinality_add(ws$dst_hll, dst);
-	hll_cardinality_add(ws$port_hll, c$id$resp_p);
+	hll_cardinality_add(ws$port_hll, co$dst_port);
 
 	if ( ! seen_before(hs$seen_dst, dst) )
 		ws$n_new_dst += 1;
@@ -85,10 +113,10 @@ event connection_state_remove(c: connection) &priority=-5
 	if ( Site::is_local_addr(dst) )
 		ws$n_internal += 1;
 
-	if ( c$conn$conn_state in failed_states )
+	if ( co$state in failed_states )
 		ws$n_failed += 1;
 
-	ws$starts += time_to_double(c$start_time);
+	ws$starts += time_to_double(co$start);
 	}
 
 function start_cv(starts: vector of double): double

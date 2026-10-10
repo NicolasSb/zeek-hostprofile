@@ -37,6 +37,21 @@ export {
 	redef record HostState += {
 		seen_domain: Novelty &optional;
 	};
+
+	## A query or a reply, as sent by the worker; ``uid`` and ``id`` match
+	## them.
+	type DnsObs: record {
+		uid: string;
+		id: count;
+		## Query name (queries only).
+		name: string &optional;
+		## Response code (replies only).
+		rcode: count &optional;
+	};
+
+	redef record Observation += {
+		dns: DnsObs &optional;
+	};
 }
 
 event dns_request(c: connection, msg: dns_msg, query: string, qtype: count, qclass: count, original_query: string)
@@ -45,38 +60,55 @@ event dns_request(c: connection, msg: dns_msg, query: string, qtype: count, qcla
 	if ( ! is_monitored(h) )
 		return;
 
-	local ws = window_state(h);
-	local hs = host_state(h);
-	local name = to_lower(query);
-
-	if ( ! ws?$domain_hll )
-		ws$domain_hll = new_distinct_counter();
-	if ( ! hs?$seen_domain )
-		hs$seen_domain = new_novelty();
-
-	ws$n_dns += 1;
-	add ws$pending[c$uid, msg$id];
-	hll_cardinality_add(ws$domain_hll, name);
-
-	if ( ! seen_before(hs$seen_domain, name) )
-		ws$n_new_domain += 1;
+	send(Observation($host=h, $ts=network_time(),
+	                 $dns=DnsObs($uid=c$uid, $id=msg$id, $name=to_lower(query))));
 	}
 
 event dns_message(c: connection, is_orig: bool, msg: dns_msg, len: count)
 	{
+	local h = c$id$orig_h;
+	if ( is_orig || ! is_monitored(h) )
+		return;
+
+	send(Observation($host=h, $ts=network_time(),
+	                 $dns=DnsObs($uid=c$uid, $id=msg$id, $rcode=msg$rcode)));
+	}
+
+hook observe(o: Observation)
+	{
+	if ( ! o?$dns )
+		return;
+
+	local d = o$dns;
+	local h = o$host;
+
+	if ( d?$name )
+		{
+		local ws = window_state(h);
+		local hs = host_state(h);
+
+		if ( ! ws?$domain_hll )
+			ws$domain_hll = new_distinct_counter();
+		if ( ! hs?$seen_domain )
+			hs$seen_domain = new_novelty();
+
+		ws$n_dns += 1;
+		add ws$pending[d$uid, d$id];
+		hll_cardinality_add(ws$domain_hll, d$name);
+
+		if ( ! seen_before(hs$seen_domain, d$name) )
+			ws$n_new_domain += 1;
+		return;
+		}
+
 	# Only the first reply to a query of the open window counts: late,
 	# duplicated and unsolicited replies are ignored.
-	local h = c$id$orig_h;
-	if ( is_orig || h !in windows )
+	if ( h !in windows || [d$uid, d$id] !in windows[h]$pending )
 		return;
 
-	local ws = windows[h];
-	if ( [c$uid, msg$id] !in ws$pending )
-		return;
-
-	delete ws$pending[c$uid, msg$id];
-	if ( msg$rcode == 3 )
-		ws$n_nxdomain += 1;
+	delete windows[h]$pending[d$uid, d$id];
+	if ( d$rcode == 3 )
+		windows[h]$n_nxdomain += 1;
 	}
 
 hook finalize(h: addr, ws: WindowState, hs: HostState, f: Features)
