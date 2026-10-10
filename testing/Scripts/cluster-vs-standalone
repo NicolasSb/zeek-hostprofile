@@ -1,0 +1,44 @@
+#!/bin/sh
+# Usage: cluster-vs-standalone broker|zeromq proxy|noproxy SCRIPT
+# Runs every trace standalone, then in a local cluster (manager, one worker
+# and, with "proxy", one proxy), and fails if the feature logs differ.
+backend=$1 mode=$2 script=$(realpath "$3")
+fail=0
+
+# Before Zeek 8.1, Broker is built in and has no backend script.
+backend_script=policy/frameworks/cluster/backend/$backend
+[ -e "$(zeek-config --script_dir)/$backend_script" ] || backend_script=
+
+run() {
+	btest-bg-run "$1" "cp ../cluster-layout.zeek . && CLUSTER_NODE=$1 zeek $PACKAGE $backend_script $script $2"
+}
+
+for trace in "$TRACES"/*.pcap; do
+	dir=$mode/$(basename "$trace" .pcap)
+	mkdir -p "$dir/standalone"
+	(
+	cd "$dir" || exit 1
+	proxy=
+	[ "$mode" = proxy ] && proxy="[\"proxy\"] = [\$node_type=Cluster::PROXY, \$ip=127.0.0.1, \$p=$BROKER_PROXY_PORT, \$manager=\"manager\"],"
+	cat >cluster-layout.zeek <<-LAYOUT
+	redef Cluster::nodes = {
+		["manager"] = [\$node_type=Cluster::MANAGER, \$ip=127.0.0.1, \$p=$BROKER_MANAGER_PORT],
+		$proxy
+		["worker"] = [\$node_type=Cluster::WORKER, \$ip=127.0.0.1, \$p=$BROKER_WORKER_PORT, \$manager="manager"],
+	};
+	LAYOUT
+
+	(cd standalone && zeek -r "$trace" "$PACKAGE" "$script")
+	run manager
+	[ "$mode" = proxy ] && run proxy
+	run worker "-r $trace"
+	btest-bg-wait 30 || exit 1
+
+	for d in standalone manager; do
+		zeek-cut -m -u <$d/hostprofile_features.log >$d/features
+	done
+	# A header alone would let two empty logs compare equal.
+	[ "$(wc -l <manager/features)" -ge 2 ] && diff standalone/features manager/features
+	) || { echo "$dir: cluster output differs" >&2; fail=1; }
+done
+exit $fail
