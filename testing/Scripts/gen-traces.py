@@ -192,7 +192,37 @@ def tls():
     tr.write("tls.pcap")
 
 
+def beacon():
+    """Per-destination regularity, one 5-minute window.
+    A = 10.0.0.1: 6 connections to 198.51.100.7 every 30 s (a beacon), mixed
+      with 5 irregular ones to other destinations: the beacon gives
+      beacon_cv 0.0 while start_cv over all 11 connections stays high.
+    B = 10.0.0.2: 4 connections to 198.51.100.7 with gaps 10, 20, 30 s:
+      beacon_cv = std / mean = 8.165 / 20 = 0.408.
+    C = 10.0.0.3: 3 connections every 10 s, under beacon_min_conns (4):
+      beacon_cv -1.0.
+    """
+    tr = Trace()
+    a, b, c, c2 = "10.0.0.1", "10.0.0.2", "10.0.0.3", "198.51.100.7"
+    sport = 42000
+    for i in range(6):
+        tr.tcp_conn(T0 + 10 + 30 * i, a, sport, c2, 443, b"x")
+        sport += 1
+    for i, (t, dst) in enumerate([(3, "1.1.1.1"), (4, "8.8.8.8"), (51, "9.9.9.9"),
+                                  (52, "1.0.0.1"), (200, "8.8.4.4")]):
+        tr.tcp_conn(T0 + t, a, sport, dst, 80, b"x")
+        sport += 1
+    for t in (0, 10, 30, 60):
+        tr.tcp_conn(T0 + t, b, sport, c2, 443, b"x")
+        sport += 1
+    for t in (0, 10, 20):
+        tr.tcp_conn(T0 + t, c, sport, c2, 443, b"x")
+        sport += 1
+    tr.write("beacon.pcap")
+
+
 if __name__ == "__main__":
     conn_windows()
     dns()
     tls()
+    beacon()
