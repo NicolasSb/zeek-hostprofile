@@ -1,10 +1,28 @@
 HostProfile
 =================================
 
-Per-host behavioral feature vectors for Zeek. Time is cut into tumbling
-windows (HostProfile::window_len, 5 min by default); for each local host
-(Site::local_nets) that originated traffic during a window, one row is
-written to hostprofile_features.log.
+Turns raw traffic into one row of 17 features per local host every 5
+minutes, so that a model can spot a host whose behavior changes.
+
+A host profile is the behavior of one local host (Site::local_nets) during
+one window:
+
+- Input: everything the host originates, whatever the destination: its
+  connections, DNS queries and TLS server names (SNI).
+- Windows: tumbling, 5 min by default (HostProfile::window_len).
+- Per host and window, 17 statistics:
+  - volume: connections, bytes out and in;
+  - diversity: distinct destinations and ports (HyperLogLog estimates);
+  - novelty: share of destinations, domains and SNIs never seen before for
+    this host (Bloom filter memory, forgotten after a day of inactivity);
+  - structure: share of internal destinations, share of failed connections;
+  - rhythm: regularity of the gaps between connections, overall and towards
+    the most regular destination (near 0 = beaconing);
+  - DNS: queries, distinct domains, NXDOMAIN share;
+  - idle time since the host's previous active window.
+- Output: one row per active host and window in hostprofile_features.log
+  (Zeek TSV or JSON), ready for an anomaly detection model, identical on a
+  standalone Zeek and on a cluster.
 
 Configuration
 -------------
@@ -23,6 +41,28 @@ standalone Zeek. Workers send each observation (connection, DNS message,
 SNI) to the proxy owning its host (chosen by hashing the host), which keeps
 the windows and writes the rows. Without a proxy, the manager does it and
 warns at startup: add proxies to spread the load.
+
+Resources
+---------
+
+Measured on Zeek 9.0 (one process, CICIDS-2017 Friday capture, 8.3 GB, 28
+profiled hosts), two runs each:
+
+  CPU      +1 to +9 % user time over plain Zeek (runs vary by ~10 %)
+  memory   +1 to 2 MB peak on that capture
+
+Memory grows with the number of profiled hosts, mostly the novelty memory
+(one Bloom filter of about 18 KB per kind: destinations, domains, SNIs; two
+after a rotation). Measured per host:
+
+  long-lived state       54 KB, up to 107 KB once filters have rotated
+  open window (active)   7 KB
+
+So about 110 MB per 1,000 hosts in the worst case. Hosts are forgotten after
+HostProfile::host_expire (1 day) of inactivity. The filter size scales with
+HostProfile::novelty_capacity (10,000 keys) and log(1 / novelty_fp): e.g.
+novelty_capacity = 2000 divides it by 5, at the cost of forgetting sooner.
+In a cluster this memory lives on the proxies, spread across them.
 
 Layout
 ------
