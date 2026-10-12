@@ -2,10 +2,13 @@
 ##!
 ##! Counts every connection originated by a monitored host when Zeek removes
 ##! it, in the window of its last packet (so a long connection is counted,
-##! with all its bytes, in the window where it ends). Columns: connection count, payload bytes out/in, distinct
-##! destinations and ports, share of never-seen destinations, share of local
-##! destinations, share of failed attempts, and ``start_cv``, the regularity
-##! of connection starts (near 0 = clockwork rhythm, e.g. beaconing).
+##! with all its bytes, in the window where it ends). Columns: connection
+##! count, payload bytes out/in, distinct destinations and ports, share of
+##! never-seen destinations, share of local destinations, share of failed
+##! attempts, and the regularity of connection starts (near 0 = clockwork
+##! rhythm, e.g. beaconing): overall (``start_cv``) and towards the most
+##! regular destination in the window (``beacon_cv``). Beacons slower than
+##! about one per minute, or sent in bursts, are not caught.
 
 @load base/protocols/conn
 @load ../main
@@ -15,6 +18,10 @@ module HostProfile;
 export {
 	## Connection states counted as failed attempts.
 	const failed_states: set[string] = { "S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR" } &redef;
+
+	## Connections to one destination within a window needed to measure
+	## its regularity (beacon_cv).
+	const beacon_min_conns = 4 &redef;
 
 	redef record Features += {
 		## Connections removed during the window.
@@ -36,6 +43,9 @@ export {
 		## between sorted connection start times; -1.0 if fewer than 3
 		## connections or a zero mean gap.
 		start_cv: double &log &default=-1.0;
+		## Lowest start_cv among the destinations contacted at least
+		## beacon_min_conns times; -1.0 if none.
+		beacon_cv: double &log &default=-1.0;
 	};
 
 	redef record WindowState += {
@@ -47,7 +57,8 @@ export {
 		n_failed: count &default=0;
 		dst_hll: opaque of cardinality &optional;
 		port_hll: opaque of cardinality &optional;
-		starts: vector of double &default=vector();
+		## Connection start times, per destination.
+		dst_starts: table[addr] of vector of double &default=table();
 	};
 
 	redef record HostState += {
@@ -116,7 +127,9 @@ hook observe(o: Observation)
 	if ( co$state in failed_states )
 		ws$n_failed += 1;
 
-	ws$starts += time_to_double(co$start);
+	if ( dst !in ws$dst_starts )
+		ws$dst_starts[dst] = vector();
+	ws$dst_starts[dst] += time_to_double(co$start);
 	}
 
 function start_cv(starts: vector of double): double
@@ -163,5 +176,18 @@ hook finalize(h: addr, ws: WindowState, hs: HostState, f: Features)
 	f$frac_new_dst = ws$n_new_dst / n;
 	f$frac_internal_dst = ws$n_internal / n;
 	f$frac_failed = ws$n_failed / n;
-	f$start_cv = start_cv(ws$starts);
+	local starts: vector of double = vector();
+	for ( _, s in ws$dst_starts )
+		{
+		for ( i in s )
+			starts += s[i];
+
+		if ( |s| < beacon_min_conns )
+			next;
+
+		local cv = start_cv(s);
+		if ( cv >= 0.0 && (f$beacon_cv < 0.0 || cv < f$beacon_cv) )
+			f$beacon_cv = cv;
+		}
+	f$start_cv = start_cv(starts);
 	}
