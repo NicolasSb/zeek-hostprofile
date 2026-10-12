@@ -1,6 +1,8 @@
 HostProfile
 =================================
 
+DOI: https://doi.org/10.5281/zenodo.23313580 (all versions; see CITATION.cff)
+
 Turns raw traffic into one row of 17 features per local host every 5
 minutes, so that a model can spot a host whose behavior changes.
 

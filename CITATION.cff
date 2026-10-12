@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "HostProfile: per-host behavioral feature vectors for Zeek"
+type: software
+authors:
+  - family-names: Sourbier
+    given-names: Nicolas
+version: 0.1.1
+date-released: 2026-10-12
+doi: 10.5281/zenodo.23313580
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23313581
+    description: "Version 0.1.0"
+repository-code: "https://github.com/NicolasSb/zeek-hostprofile"
+license: BSD-3-Clause
+abstract: >-
+  A Zeek package that turns raw traffic into one row of 17 features per
+  local host every 5 minutes (volume, diversity, novelty, structure,
+  rhythm, DNS, TLS), for anomaly detection. Works standalone and on
+  Broker or ZeroMQ clusters.
+keywords:
+  - zeek
+  - network security
+  - anomaly detection
+  - feature extraction
+  - intrusion detection
