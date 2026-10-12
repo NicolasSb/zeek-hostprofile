@@ -3,9 +3,12 @@ script_dir = scripts
 test_command = cd testing && btest -c btest.cfg
 depends = zeek >=8.0.0
 summary = Per-host behavioral feature vectors over tumbling time windows.
-description = Writes hostprofile_features.log: for every local host active
-	during a window, one row of connection, DNS and TLS features (volume,
-	diversity, novelty, failure rate, rhythm), for anomaly detection or ML.
+description = Writes hostprofile_features.log: every 5 minutes, one row of
+	17 features per active local host, from its connections, DNS queries
+	and TLS server names (volume, diversity, novelty, failures, rhythm and
+	beaconing), ready for anomaly detection or ML. Works standalone and on
+	Broker or ZeroMQ clusters.
+tags = anomaly detection, machine learning, feature extraction, host profiling, beaconing, intrusion detection, conn, dns, tls
 
 [template]
 source = https://github.com/zeek/package-template
