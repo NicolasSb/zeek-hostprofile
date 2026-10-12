@@ -24,6 +24,42 @@ one window:
   (Zeek TSV or JSON), ready for an anomaly detection model, identical on a
   standalone Zeek and on a cluster.
 
+Columns
+-------
+
+  ts                 start of the window
+  host               the profiled host
+  idle_before        seconds since the end of the host's previous active
+                     window; -1 for its first window
+  n_conns            connections whose last packet falls in the window
+  bytes_out          payload bytes sent / received over those connections
+  bytes_in
+  n_dst              distinct destination addresses / ports (estimates)
+  n_dst_ports
+  frac_new_dst       share of connections to a destination never seen
+                     before for this host
+  frac_internal_dst  share of connections to a local destination
+  frac_failed        share of failed attempts (S0, REJ, ...)
+  start_cv           regularity of connection starts: std / mean of the
+                     gaps (0 = clockwork); -1 under 3 connections
+  beacon_cv          lowest start_cv among the destinations contacted at
+                     least 4 times; -1 if none
+  n_dns              DNS queries sent
+  n_domains          distinct query names (estimate)
+  frac_new_domain    share of queries for a name never queried before
+  frac_nxdomain      share of queries answered NXDOMAIN
+  n_sni              TLS client hellos carrying a server name
+  frac_new_sni       share of server names never seen before
+
+When a family has no activity in the window, its counts and shares are 0
+and its regularity columns -1. Example row (CICIDS-2017, a workstation):
+
+  ts 1499428800.0  host 192.168.10.14  idle_before -1.0  n_conns 204
+  bytes_out 787363  bytes_in 941544  n_dst 43  n_dst_ports 18
+  frac_new_dst 0.22  frac_internal_dst 0.71  frac_failed 0.02
+  start_cv 3.56  beacon_cv 0.69  n_dns 366  n_domains 74
+  frac_new_domain 0.21  frac_nxdomain 0.01  n_sni 57  frac_new_sni 0.54
+
 Configuration
 -------------
 
