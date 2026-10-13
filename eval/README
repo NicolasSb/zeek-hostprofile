@@ -1,0 +1,88 @@
+Evaluation
+==========
+
+Reproducible evaluation of the features on public datasets: one command,
+pinned Zeek and Python images, fixed Zeek hash seeds, checksummed data. Two
+runs give the same results.txt.
+
+Data
+----
+
+Not versioned. Put them in eval/data/ (or pass DATA=...):
+
+  Monday/Tuesday/Wednesday/Thursday/Friday-WorkingHours.pcap,
+  GeneratedLabelledFlows.zip
+      CICIDS-2017, https://www.unb.ca/cic/datasets/ids-2017.html
+  ctu13/botnet-capture-*.pcap (neris, rbot, donbot, qvod)
+      CTU-13 scenarios 42, 44, 47, 49,
+      https://mcfp.felk.cvut.cz/publicDatasets/CTU-Malware-Capture-Botnet-<N>/
+
+data.sha256 lists the expected files.
+
+Run
+---
+
+  make eval            # check data, extract features (~10 min), evaluate
+  make results         # evaluate again from out/
+
+Results go to out/results.txt.
+
+Protocol
+--------
+
+Fixed before measuring; nothing is tuned on the test data.
+
+- Features: the package with default settings, Zeek 9.0.0, -C (CICIDS
+  checksums are offloaded). Private ranges are local (Zeek default), so
+  172.16.0.1, the CICIDS attacker behind NAT, is profiled.
+- Labels: a (host, 5-min window) takes the attack of any labelled CICIDS
+  flow that host originated in it. CSV times are local (UTC-3), day/month,
+  12-hour without AM/PM. The internal scan of the Thursday infiltration is
+  not labelled in the CSVs; it is added from the dataset documentation
+  (192.168.10.8, 15:04-15:45 local).
+- Detector: IsolationForest on log1p(features), trained on Monday (benign
+  only). 10 seeds, mean (and range) reported.
+- Metrics: AUC, and the share of attack windows detected at equal
+  false-alarm rates (0.1, 0.5, 1 % of the test day's benign windows). These
+  thresholds use the test labels: they compare feature sets, they are not
+  deployable thresholds.
+- Feature sets: Baseline = n_conns, bytes_out, bytes_in (what NetFlow
+  counters give); HostProfile = all columns.
+- Days: Thursday and Friday were used while developing the features.
+  Tuesday was the first holdout: nothing was tuned on it, but it has been
+  looked at (first with an alert threshold fixed on Monday, which compared
+  feature sets at unequal false-alarm rates and was replaced by the metric
+  above). It is no longer a clean holdout.
+- CTU-13: windows of the infected host (147.32.84.165) vs all CICIDS benign
+  windows, each rhythm feature alone; no setting tuned on these captures.
+
+Planned holdout: Wednesday
+--------------------------
+
+Declared 2026-10-13, before Wednesday-WorkingHours.pcap was ever processed.
+Its attacks (DoS Slowloris, Slowhttptest, Hulk, GoldenEye; Heartbleed) were
+never seen while developing the features or the detector.
+
+Chosen detector, fixed: the generic one above (global IsolationForest,
+trained on Monday, no other setting). It looks for anything unusual, not
+for known attacks. Wednesday is run once with evaluate.py as it is, with
+the metrics above, and reported as is.
+
+Run once on 2026-10-13, no code change (only its checksum added to
+data.sha256); results reported as is in the top-level README.
+
+Explored and not retained (compare.py, Thursday and Friday only): per-host
+z-score and per-host quantile scores. They catch a known host that changes
+behavior far better (Infiltration: 3 -> 53 % at 0.1 % false alarms; first
+detections of the Ares bot) but miss hosts without history (attacks from
+172.16.0.1) and are limited by one day of history (about 70 windows per
+host). Per-host scoring needs a longer history: future work.
+
+Limits
+------
+
+- Few attack windows (2 to 166 per attack): one window moves a percentage.
+- CICIDS benign traffic is scripted, more regular than real traffic.
+- Attacks from 172.16.0.1 are partly separated by frac_internal_dst because
+  the attacker sits behind an internal NAT, a dataset artefact.
+- CTU-13 and CICIDS are different networks and years.
