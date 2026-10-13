@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Sourbier
     given-names: Nicolas
-version: 0.1.1
-date-released: 2026-10-12
+version: 0.1.2
+date-released: 2026-10-13
 doi: 10.5281/zenodo.23313580
 identifiers:
   - type: doi
