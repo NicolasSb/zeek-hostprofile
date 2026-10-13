@@ -9,11 +9,11 @@ on:
 jobs:
   # Same pinned Zeek image as `make test`: red here means red locally.
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - run: make test
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       if: failure()
       with:
         name: btest-diag
@@ -21,9 +21,9 @@ jobs:
 
   # The committed traces must match what gen-traces.py produces.
   traces:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - run: |
         sum() { (cd testing/Traces && find . -type f | sort | xargs sha256sum); }
         sum > "$RUNNER_TEMP/before"
@@ -34,18 +34,18 @@ jobs:
   # Other Zeek versions: informative only, baselines may differ.
   compat:
     name: compat-${{ matrix.zeekver }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         zeekver: [zeek-lts, zeek-nightly]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - uses: zeek/action-zkg-install@v2
       with:
         zeek_version: ${{ matrix.zeekver }}
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       if: failure()
       with:
         name: zkg-logs-${{ matrix.zeekver }}
